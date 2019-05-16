@@ -7,41 +7,44 @@ import json
 
 #Classe que representa o multilayer perceptron
 class RBFNet():
-	#Construtor. Recebe o tamanho das cadamas de entrada, oculta e de saidas
-	def __init__(self, input_length, hidden_length, output_length, learning_rate=5e-1):
+	#Construtor. Recebe o tamanho da cadama de entrada, centroides, dispersao, tamanho da camada de saida
+	#e taxa de aprendizado
+	def __init__(self, input_length, centers, spread, output_length, learning_rate=5e-1):
 		self.input_length = input_length
-		self.hidden_length = hidden_length
+		self.centers = centers
+		self.spread = spread
+		self.hidden_length = centers.shape[0]
 		self.output_length = output_length
 		self.learning_rate = learning_rate
-
-		#Inicializa os pesos da camada oculta aleatoriamente, representando-os na forma de matriz
-		#Os pesos e vies de cada neuronio sao dispostos em linhas
-		#Em input_length+1, o +1 serve para representar o vies
-		self.hidden_layer = np.random.uniform(-0.5, 0.5, (hidden_length, input_length+1))
 
 		#Inicializa os pesos da camada de saida aleatoriamente, representado-os na forma de matriz
 		#Os pesos e vies de cada neuronio sao dispostos em linhas
 		#Em hidden_length+1, o +1 serve para representar o vies
-		self.output_layer = np.random.uniform(-0.5, 0.5, (output_length, hidden_length+1))
+		self.output_layer = np.random.uniform(-0.5, 0.5, (self.output_length, self.hidden_length+1))
 
 	def save_to_disk(self, file_name):
 		print('Saving model to', file_name)
 		with open(file_name, 'wb') as file:
 			pickle.dump(self, file)
 
-	#Funcao de ativacao (sigmoide)
+	#Funcao de ativacao (gaussiana)
+	#net, neste caso, é só o dado de entrada (nao tem camada anterior à camada RBF)
 	def activ(self, net):
-		return (1./(1.+math.exp(-net)))
+		#Cria um vetor com a distancia da entrada para cada centroide
+		dists = np.array([np.linalg.norm(net - self.centers[i]) for i in range(self.centers.shape[0])])
+		#Calcula a funcao de ativacao (gaussiana) para cada distancia
+		fnet = np.exp(-((dists**2)/(2*(self.spread**2))))
+		return fnet
 
-	#Derivada da funcao de ativacao (sigmoide)
-	def deriv_activ(self, fnet):
-		one_vector = np.ones(fnet.shape)
-		return fnet*(one_vector-fnet)
-
+	#Faz forward propagation, retornando apenas o vetor produzido pela camada de saida
+	#Isto eh feito porque, para usos do forward propagation fora do treinamento, 
+	#nao interessa saber o valor produzido pela camada oculta
 	def forward(self, input_vect):
-		return self.forward_training(input_vect)[3]
+		return self.forward_training(input_vect)[1]
 
 	#Faz forward propagation (calcula a predicao da rede)
+	#Retorna tanto a saida da camada oculta quanto da camada de saida, 
+	#usados no algoritmo de treinamento
 	def forward_training(self, input_vect):
 		input_vect = np.array(input_vect)
 		#Checa se o tamanho da entrada corresponde ao que eh esperado pela rede
@@ -49,17 +52,8 @@ class RBFNet():
 			message = 'Tamanho incorreto de entrada. Recebido: {} || Esperado: {}'.format(input_vect.shape[0], self.input_length)
 			raise Exception(message)
 
-		#Adiciona um componente "1" ao vetor de entrada para permitir calculo do bias
-		#na camada oculta
-		biased_input = np.zeros((input_vect.shape[0]+1))
-		biased_input[0:input_vect.shape[0]] = input_vect[:]
-		biased_input[input_vect.shape[0]] = 1
-
-		#Calcula a transformacao da entrada pela camada oculta usando produto de matriz por vetor 
-		#Wh x A = net, sendo Wh a matriz de pesos da camada oculta e A o vetor de entrada 
-		hidden_net = np.dot(self.hidden_layer, biased_input)
-		#Aplica a funcao de ativacao sobre a transformacao feita pela camada oculta
-		hidden_fnet = np.array([self.activ(x) for x in hidden_net])
+		#Passa o vetor de entrada pela camada oculta, calculando a sua distancia para cada centroide
+		hidden_fnet = self.activ(input_vect)
 
 		#Adiciona um componente "1" ao vetor produzido pela camada oculta para permitir calculo do bias
 		#na camada de saida
@@ -71,13 +65,12 @@ class RBFNet():
 		#Wo x H = net, sendo Wo a matriz de pesos da camada de saida e H o vetor produzido pela ativacao
 		#da camada oculta
 		out_net = np.dot(self.output_layer, biased_hidden_activ)
-		#Aplica a funcao de ativacao nos valores produzidos pela transformacao da camada de saida
-		out_fnet = np.array([self.activ(x) for x in out_net])
+		#Como a camada de saida usa ativacao linear, nenhuma ativacao é aplicada
 
-		#Retorna net e f(net) da camada oculta e da camada de saida
-		return hidden_net, hidden_fnet, out_net, out_fnet
+		#Retorna ativacao da camada oculta 
+		return hidden_fnet, out_net
 
-	#Faz backpropagation
+	#Treina a rede aplicando recursive least-squares (RLS)
 	def fit(self, input_samples, target_labels, threshold, learning_rate=None):
 		if(learning_rate is not None):
 			self.learning_rate = learning_rate
