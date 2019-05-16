@@ -6,7 +6,7 @@ import os
 import json
 
 #Classe que representa o multilayer perceptron
-class MLP():
+class RBFNet():
 	#Construtor. Recebe o tamanho das cadamas de entrada, oculta e de saidas
 	def __init__(self, input_length, hidden_length, output_length, learning_rate=5e-1):
 		self.input_length = input_length
