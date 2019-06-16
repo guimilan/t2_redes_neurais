@@ -11,9 +11,9 @@ class RBFNet():
 	#e taxa de aprendizado
 	def __init__(self, input_length, centers, spread, output_length, learning_rate=5e-1):
 		self.input_length = input_length
-		self.centers = centers
+		self.centers = np.array(centers)
 		self.spread = spread
-		self.hidden_length = centers.shape[0]
+		self.hidden_length = self.centers.shape[0]
 		self.output_length = output_length
 		self.learning_rate = learning_rate
 
@@ -27,7 +27,7 @@ class RBFNet():
 		with open(file_name, 'wb') as file:
 			pickle.dump(self, file)
 
-	#Funcao de ativacao (gaussiana)
+	#Funcao de ativacao da camada oculta (gaussiana)
 	#net, neste caso, é só o dado de entrada (nao tem camada anterior à camada RBF)
 	def activ(self, net):
 		#Cria um vetor com a distancia da entrada para cada centroide
@@ -36,11 +36,18 @@ class RBFNet():
 		fnet = np.exp(-((dists**2)/(2*(self.spread**2))))
 		return fnet
 
+	def activ_output(self, net):
+		return (1./(1.+math.exp(-net)))
+
+	def deriv_activ_output(self, fnet):
+		one_vector = np.ones(fnet.shape)
+		return fnet*(one_vector-fnet)
+
 	#Faz forward propagation, retornando apenas o vetor produzido pela camada de saida
 	#Isto eh feito porque, para usos do forward propagation fora do treinamento, 
 	#nao interessa saber o valor produzido pela camada oculta
 	def forward(self, input_vect):
-		return self.forward_training(input_vect)[1]
+		return self.forward_training(input_vect)[2]
 
 	#Faz forward propagation (calcula a predicao da rede)
 	#Retorna tanto a saida da camada oculta quanto da camada de saida, 
@@ -65,27 +72,29 @@ class RBFNet():
 		#Wo x H = net, sendo Wo a matriz de pesos da camada de saida e H o vetor produzido pela ativacao
 		#da camada oculta
 		out_net = np.dot(self.output_layer, biased_hidden_activ)
+		out_fnet = np.array([self.activ_output(x) for x in out_net])
 		#Como a camada de saida usa ativacao linear, nenhuma ativacao é aplicada
 
+
 		#Retorna ativacao da camada oculta 
-		return hidden_fnet, out_net
+		return hidden_fnet, out_net, out_fnet
 
 	#Treina a rede aplicando recursive least-squares (RLS)
-	def fit(self, input_samples, target_labels, threshold, learning_rate=None):
+	def fit(self, input_samples, target_labels, absolute_threshold, relative_threshold, learning_rate=None):
 		if(learning_rate is not None):
 			self.learning_rate = learning_rate
 
 		#Erro quadratico medio eh inicializado com um valor arbitrario (maior que o threshold de parada)
 		#p/ comecar o treinamento
-		mean_squared_error = 2*threshold
+		mean_squared_error = 2*absolute_threshold
 		previous_mean_squared_error = 0.001
+		relative_error = 1.0
 
 		#Inicializa o numero de epocas ja computadas
 		epochs = 0
 
 		#Enquanto não chega no erro quadratico medio desejado ou atingir 5000 epocas, continua treinando
-		while(mean_squared_error > threshold and epochs < 5000 and \
-		 math.fabs(mean_squared_error-previous_mean_squared_error)/previous_mean_squared_error > 10e-2):
+		while(mean_squared_error > absolute_threshold and epochs < 5000 and relative_error > relative_threshold):
 			#Erro quadratico medio da epoca eh inicializado com 0
 			previous_mean_squared_error = mean_squared_error
 			mean_squared_error = 0
@@ -100,7 +109,7 @@ class RBFNet():
 				target_label = target_labels[i]
 
 				#Pega net e f(net) da camada oculta e da camada de saida
-				hidden_net, hidden_fnet, out_net, out_fnet = self.forward_training(input_samples[i])
+				hidden_fnet, out_net, out_fnet = self.forward_training(input_samples[i])
 				
 				#Cria um vetor com o erro de cada neuronio da camada de saida
 				error_array = (target_label - out_fnet)
@@ -109,20 +118,9 @@ class RBFNet():
 				#delta_o_pk = (Ypk-Ok)*Opk(1-Opk), sendo p a amostra atual do conjunto de treinamento,
 				#e k um neuronio da camada de saida. Ypk eh a saida esperada do neuronio pelo exemplo do dataset,
 				#Opk eh a saida de fato produzida pelo neuronio
-				delta_output_layer = error_array * self.deriv_activ(out_fnet)
+				delta_output_layer = error_array * self.deriv_activ_output(out_fnet)
 
-				#Calcula a variacao dos pesos da camada oculta com a regra delta generalizada
-				#delta_h_pj = f'(net_h)*(1-f(net_h))*somatoria(delta_o_k*wkj)
-				output_weights = self.output_layer[:,0:self.hidden_length]
 
-				hidden_layer_local_gradient = np.zeros(self.hidden_length)
-				for hidden_neuron in range(0, self.hidden_length):
-					for output_neuron in range(0, self.output_length):
-							hidden_layer_local_gradient[hidden_neuron] += delta_output_layer[output_neuron]*\
-								output_weights[output_neuron, hidden_neuron]
-				
-				delta_hidden_layer = self.deriv_activ(hidden_fnet) * hidden_layer_local_gradient
-				
 				hidden_fnet_with_bias = np.zeros(hidden_fnet.shape[0]+1)
 				hidden_fnet_with_bias[0:self.hidden_length] = hidden_fnet[:]
 				hidden_fnet_with_bias[self.hidden_length] = 1
@@ -133,28 +131,18 @@ class RBFNet():
 						self.output_layer[neuron, weight] = self.output_layer[neuron, weight] + \
 							self.learning_rate * delta_output_layer[neuron] * hidden_fnet_with_bias[weight]
 
-				#Atualiza os pesos da camada oculta com a regra delta generalizada
-				#Pega os pesos dos neuronios da camada de saida (bias da camada de saida nao entra)
-				#Wji(t+1) = Wji(t)+eta*delta_h_j*Xi
-				input_sample_with_bias = np.zeros(input_sample.shape[0]+1)
-				input_sample_with_bias[0:input_sample.shape[0]] = input_sample[:]
-				input_sample_with_bias[input_sample.shape[0]] = 1
-				for neuron in range(0, self.hidden_length):
-					for weight in range(0, self.hidden_layer.shape[1]):
-						self.hidden_layer[neuron, weight] = self.hidden_layer[neuron, weight] + \
-							self.learning_rate*delta_hidden_layer[neuron]*input_sample_with_bias[weight]
-							#np.dot(delta_hidden_layer.T, input_sample_with_bias)
-
 				#O erro da saída de cada neuronio é elevado ao quadrado e somado ao erro total da epoca
 				#para calculo do erro quadratico medio ao final
-				mean_squared_error = mean_squared_error + np.sum(error_array**2)			
+				mean_squared_error = mean_squared_error + np.sum(error_array**2)	
+					
 			
 			#Divide o erro quadratico total pelo numero de exemplos para obter o erro quadratico medio
 			mean_squared_error = mean_squared_error/input_samples.shape[0]
-			#print('Erro medio quadratico', mean_squared_error)
+			relative_error = math.fabs(mean_squared_error-previous_mean_squared_error)/previous_mean_squared_error
+
 			epochs = epochs + 1
-			#if(epochs % 1000 == 0):
-			#print('End of epoch no. {}. rmse={}'.format(epochs, mean_squared_error))
+			if(epochs % 100 == 0):
+				print('End of epoch no. {}. rmse={}'.format(epochs, mean_squared_error))
 
 		print('Total epochs run', epochs)
 		print('Final rmse', mean_squared_error)
@@ -162,31 +150,26 @@ class RBFNet():
 
 #Testa a mlp com funcoes logicas
 def test_logic():
-	mlp = MLP(*(2, 2, 1))
+	print('testing for xor function')
+	zero_center = np.array([0,0])
+	one_center = np.array([1,1])
+	rbf = RBFNet(input_length=2, centers=[zero_center, one_center], spread=1.0, output_length=1)
 
 	print('\n\noutput before backpropagation')
-	print('[0,0]=', mlp.forward([0,0]))
-	print('[0,1]=', mlp.forward([0,1]))
-	print('[1,0]=', mlp.forward([1,0]))
-	print('[1,1]=', mlp.forward([1,1]))
-
-	print('layers before backprop')
-	print('hidden', mlp.hidden_layer)
-	print('output layer', mlp.output_layer)
-	print('\n')	
+	print('[0,0]=', rbf.forward([0,0]))
+	print('[0,1]=', rbf.forward([0,1]))
+	print('[1,0]=', rbf.forward([1,0]))
+	print('[1,1]=', rbf.forward([1,1]))
 
 	x = np.array([[0,0],[0,1],[1,0],[1,1]])
 	target = np.array([0, 0, 0, 1])
-	mlp.fit(x, target, 5e-1, 10e-1)
+	rbf.fit(input_samples=x, target_labels=target, absolute_threshold=10e-5, relative_threshold=10e-8, learning_rate=10e-1)
 
 	print('\n\noutput after backpropagation')
-	print('[0,0]=', mlp.forward([0,0]))
-	print('[0,1]=', mlp.forward([0,1]))
-	print('[1,0]=', mlp.forward([1,0]))
-	print('[1,1]=', mlp.forward([1,1]))
-	print('layers after backprop')
-	print('hidden', mlp.hidden_layer)
-	print('output layer', mlp.output_layer)
+	print('[0,0]=', rbf.forward([0,0]))
+	print('[0,1]=', rbf.forward([0,1]))
+	print('[1,0]=', rbf.forward([1,0]))
+	print('[1,1]=', rbf.forward([1,1]))
 
 #Carrega o dataset de digitos
 def load_digits():
