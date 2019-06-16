@@ -15,6 +15,7 @@ class RBFNet():
 		self.centers = np.array(centers)
 		self.spread = spread
 		self.hidden_length = self.centers.shape[0]
+		print('HIDDEN LAYER LENGTH', self.hidden_length)
 		self.output_length = output_length
 		self.learning_rate = learning_rate
 		self.output_activ = self.linear
@@ -32,7 +33,7 @@ class RBFNet():
 
 	#Funcao de ativacao da camada oculta (gaussiana)
 	#net, neste caso, é só o dado de entrada (nao tem camada anterior à camada RBF)
-	def activ(self, net):
+	def gaussian(self, net):
 		#Cria um vetor com a distancia da entrada para cada centroide
 		dists = np.array([np.linalg.norm(net - self.centers[i]) for i in range(self.centers.shape[0])])
 		#Calcula a funcao de ativacao (gaussiana) para cada distancia
@@ -69,7 +70,8 @@ class RBFNet():
 			raise Exception(message)
 
 		#Passa o vetor de entrada pela camada oculta, calculando a sua distancia para cada centroide
-		hidden_fnet = self.activ(input_vect)
+		hidden_fnet = self.gaussian(input_vect)
+		hidden_fnet = normalize(data=hidden_fnet, range_min=0, range_max=1)
 
 		#Adiciona um componente "1" ao vetor produzido pela camada oculta para permitir calculo do bias
 		#na camada de saida
@@ -83,7 +85,10 @@ class RBFNet():
 		out_net = np.dot(self.output_layer, biased_hidden_activ)
 		out_fnet = np.array([self.output_activ(x) for x in out_net])
 		#Como a camada de saida usa ativacao linear, nenhuma ativacao é aplicada
-
+		print('out net', out_net)
+		print('out fnet', out_fnet)
+		print('normalized hidden fnet', hidden_fnet)
+		print('output layer', self.output_layer)
 
 		#Retorna ativacao da camada oculta 
 		return hidden_fnet, out_net, out_fnet
@@ -127,12 +132,11 @@ class RBFNet():
 				#delta_o_pk = (Ypk-Ok)*Opk(1-Opk), sendo p a amostra atual do conjunto de treinamento,
 				#e k um neuronio da camada de saida. Ypk eh a saida esperada do neuronio pelo exemplo do dataset,
 				#Opk eh a saida de fato produzida pelo neuronio
-				delta_output_layer = error_array * self.output_activ_deriv(out_fnet)
-
-
+				#delta_output_layer = error_array * self.output_activ_deriv(out_fnet)
 				hidden_fnet_with_bias = np.zeros(hidden_fnet.shape[0]+1)
 				hidden_fnet_with_bias[0:self.hidden_length] = hidden_fnet[:]
 				hidden_fnet_with_bias[self.hidden_length] = 1
+				
 				#Atualiza os pesos da camada de saida
 				#Wkj(t+1) = wkj(t) + eta*deltak*Ij
 				#for neuron in range(0, self.output_length):
@@ -140,10 +144,14 @@ class RBFNet():
 				#		self.output_layer[neuron, weight] = self.output_layer[neuron, weight] - \
 				#			self.learning_rate * out_fnet[neuron] * hidden_fnet_with_bias[weight]
 				for neuron in range(0, self.output_length):
-					for weight in range(0, self.output_layer.shape[1]):
-						self.output_layer[neuron, weight] = self.output_layer[neuron,weight]\
-							- hidden_fnet_with_bias[weight]*error_array[neuron]*learning_rate
-
+					for weight in range(0, self.output_layer.shape[1]-1):
+						self.output_layer[neuron, weight] = self.output_layer[neuron,weight] - \
+							hidden_fnet_with_bias[weight]*error_array[neuron]*learning_rate
+					#Atualizacao do bias
+					self.output_layer[neuron, self.output_layer.shape[1]-1] = \
+					self.output_layer[neuron, self.output_layer.shape[1]-1] + learning_rate*error_array[neuron]
+#						print('neuron', neuron, ' weight ', weight,' after update', self.output_layer[neuron, weight])
+#						input()
 
 				#O erro da saída de cada neuronio é elevado ao quadrado e somado ao erro total da epoca
 				#para calculo do erro quadratico medio ao final
@@ -161,6 +169,16 @@ class RBFNet():
 		print('Total epochs run', epochs)
 		print('Final rmse', mean_squared_error)
 		return None
+
+def normalize(data, range_min, range_max):
+	data_min = np.min(data)
+	data_max = np.max(data)
+
+	if(data.shape[0] == 1):
+		normalized = (data/data_max)*(range_max-range_min)+range_min
+	else:
+		normalized = ((data-data_min)/(data_max-data_min))*(range_max-range_min)+range_min
+	return normalized
 
 #Testa a mlp com funcoes logicas
 def test_logic():
@@ -208,13 +226,17 @@ def plot_image(image):
 	plt.show()
 
 #Faz predicao da classe de todos os dados e compara com as classes esperadas
-def measure_score(mlp, data, target):
+def measure_score(network, data, target):
 	dataset_size = target.shape[0]
 	score = 0
 	
 	for index, data in enumerate(data):
 		expected_class = np.argmax(target[index])
-		predicted_class = np.argmax(mlp.forward(data))
+		print('expected', expected_class)
+		network_output = network.forward(data)
+		print('output', network_output)
+		predicted_class = np.argmax(network_output)
+		print('predicted', predicted_class)
 		if(expected_class == predicted_class):
 			score += 1
 
@@ -291,13 +313,14 @@ def k_fold_cross_validation(data, labels, k):
 		input_length = data[train_set].shape[1]
 		output_length = labels[test_set].shape[1]
 		
-		centers = KMeans(n_clusters=k).fit(data[train_set]).cluster_centers_
+		centers = KMeans(n_clusters=k, n_init=20, max_iter=500).fit(data[train_set]).cluster_centers_
 		rbf = RBFNet(input_length=input_length, centers=centers, spread=1.0, output_length=output_length)
+		
 		rbf.fit(input_samples=data[train_set], target_labels=labels[train_set], 
-			absolute_threshold=5e-5, relative_threshold=10e-9, learning_rate=5e-1)
+			absolute_threshold=5e-5, relative_threshold=10e-6, learning_rate=5e-1)
 
 		score, accuracy = measure_score(rbf, data[test_set], labels[test_set])
-		print('accuracy {}: {}%'.format(index, accuracy))
+		input()
 		scores.append(score)
 		accuracies.append(accuracy)
 
@@ -305,6 +328,7 @@ def k_fold_cross_validation(data, labels, k):
 	print('NUMBER OF CENTERS', rbf.hidden_length)
 	print('AVERAGE ACCURACY', np.sum(accuracies)/len(accuracies))
 	print('===========================')
+	input()
 	result_dict = build_test_result_dict(rbf, scores, accuracies)
 
 	return scores, accuracies, result_dict
@@ -325,15 +349,15 @@ def build_test_result_dict(rbf, scores, accuracies):
 	return test_results
 
 def main():
-	test_logic()
-	#data, labels = load_digits()
+	#test_logic()
+	data, labels = load_digits()
 	#Testa a rede variando o número de funções RBF e mantendo fixa a taxa de aprendizado
-	'''tests = []
+	tests = []
 	for center_quantity in range(1, 20):
 		print('Testing for center quantity', center_quantity)
 		scores, accuracies, test_result_dict = k_fold_cross_validation(data, labels, center_quantity)
 		tests.append(test_result_dict)
-	record_test_results(tests, 'hidden_layer_results.json')'''
+	record_test_results(tests, 'hidden_layer_results.json')
 	
 	'''
 	#Testa a rede mantendo fixo o tamanho da camada oculta e variando a taxa de aprendizado
