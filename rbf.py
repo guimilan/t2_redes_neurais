@@ -4,6 +4,7 @@ import math
 import pickle
 import os
 import json
+from sklearn.cluster import KMeans
 
 #Classe que representa o multilayer perceptron
 class RBFNet():
@@ -94,7 +95,7 @@ class RBFNet():
 		epochs = 0
 
 		#Enquanto não chega no erro quadratico medio desejado ou atingir 5000 epocas, continua treinando
-		while(mean_squared_error > absolute_threshold and epochs < 5000 and relative_error > relative_threshold):
+		while(mean_squared_error > absolute_threshold and epochs < 50000 and relative_error > relative_threshold):
 			#Erro quadratico medio da epoca eh inicializado com 0
 			previous_mean_squared_error = mean_squared_error
 			mean_squared_error = 0
@@ -150,19 +151,20 @@ class RBFNet():
 
 #Testa a mlp com funcoes logicas
 def test_logic():
-	print('testing for xor function')
 	zero_center = np.array([0,0])
 	one_center = np.array([1,1])
-	rbf = RBFNet(input_length=2, centers=[zero_center, one_center], spread=1.0, output_length=1)
+
+	x = np.array([[0,0],[0,1],[1,0],[1,1]])
+	centers = np.array([[0,0],[1,1]])
+	target = np.array([0, 0, 0, 1])
+	rbf = RBFNet(input_length=2, centers=centers, spread=1.0, output_length=1)
 
 	print('\n\noutput before backpropagation')
 	print('[0,0]=', rbf.forward([0,0]))
 	print('[0,1]=', rbf.forward([0,1]))
 	print('[1,0]=', rbf.forward([1,0]))
 	print('[1,1]=', rbf.forward([1,1]))
-
-	x = np.array([[0,0],[0,1],[1,0],[1,1]])
-	target = np.array([0, 0, 0, 1])
+	
 	rbf.fit(input_samples=x, target_labels=target, absolute_threshold=10e-5, relative_threshold=10e-8, learning_rate=10e-1)
 
 	print('\n\noutput after backpropagation')
@@ -258,8 +260,8 @@ def train_test_split(folds):
 
 	return train_sets, test_sets
 
-#Faz k-fold cross validation em uma mlp
-def k_fold_cross_validation(mlp, data, labels, k):
+#Faz k-fold cross validation em uma rbf
+def k_fold_cross_validation(data, labels, k):
 	print('k-fold cross validation')
 	print('Shuffling data...')
 	shuffled_data, shuffled_labels = shuffle_two_arrays(data, labels)
@@ -273,33 +275,31 @@ def k_fold_cross_validation(mlp, data, labels, k):
 	for index, (train_set, test_set) in enumerate(zip(train_sets, test_sets)):
 		#print('Performing validation with fold no. {}...'.format(index))
 		#print('Training...')
-		mlp = MLP(mlp.input_length, mlp.hidden_length, mlp.output_length, mlp.learning_rate)
-		mlp.fit(data[train_set], labels[train_set], 5e-2)
-		#print('Testing with test set', index)
-		score, accuracy = measure_score(mlp, data[test_set], labels[test_set])
+		input_length = data[train_set].shape[1]
+		output_length = labels[test_set].shape[1]
+		
+		print('input length', input_length)
+		print('output length', output_length)
+
+		print('Performing k-means clustering on the training set...')
+		centers = KMeans(n_clusters=k, random_state=0).fit(data[train_set]).cluster_centers_
+		print('centers', centers)
+		rbf = RBFNet(input_length=input_length, centers=centers, spread=1.0, output_length=output_length)
+		rbf.fit(input_samples=data[train_set], target_labels=labels[train_set], 
+			absolute_threshold=5e-3, relative_threshold=10e-8, learning_rate=5e-1)
+
+		score, accuracy = measure_score(rbf, data[test_set], labels[test_set])
 		print('accuracy {}: {}%'.format(index, accuracy))
 		scores.append(score)
 		accuracies.append(accuracy)
 
 	print('===========================')
-	print('NUMBER OF NEURONS', mlp.hidden_length)
+	print('NUMBER OF NEURONS', rbf.hidden_length)
 	print('AVERAGE ACCURACY', np.sum(accuracies)/len(accuracies))
 	print('===========================')
+	result_dict = build_test_result_dict(rbf, scores, accuracies)
 
-	return scores, accuracies
-
-#Carrega uma mlp do disco a partir de um arquivo .pickle
-def load_mlp_from_disk(filename):
-	mlp = None
-	if(os.path.isfile(filename)):
-		with open(filename, 'rb') as file:
-			mlp = pickle.load(file)
-			print('MLP successfully loaded. Properties:')
-			print('Input layer size: {}'.format(mlp.input_length))
-			print('Hidden layer size: {}'.format(mlp.hidden_length))
-			print('Output layer size: {}'.format(mlp.output_length))
-			print('Learning rate: {}'.format(mlp.learning_rate))
-	return mlp
+	return scores, accuracies, result_dict
 
 #Grava os resultados do teste em um arquivo .json
 def record_test_results(test_results, filename):
@@ -308,35 +308,34 @@ def record_test_results(test_results, filename):
 		json.dump(test_results, file)
 
 #Compoe os resultados do teste em um dicionario pra facilitar gravacao
-def build_test_result_dict(mlp, scores, accuracies):
+def build_test_result_dict(rbf, scores, accuracies):
 	test_results = dict()
-	test_results['hidden_layer_size'] = mlp.hidden_length
-	test_results['learning_rate'] = mlp.learning_rate
+	test_results['hidden_layer_size'] = rbf.hidden_length
+	test_results['learning_rate'] = rbf.learning_rate
 	test_results['scores'] = scores
 	test_results['accuracies'] = accuracies
 	return test_results
 
 def main():
 	#test_logic()
-	'''data, labels = load_digits()
+	data, labels = load_digits()
 	#Testa a rede variando o tamanho da camada oculta e mantendo fixa a taxa de aprendizado
 	tests = []
-	for hidden_layer_size in range(1, 129):
-		print('Testing for hidden layer size', hidden_layer_size)
-		mlp = MLP(*[256, hidden_layer_size, 10], 5e-1)
-		scores, accuracies = k_fold_cross_validation(mlp, data, labels, 5)
-		tests.append(build_test_result_dict(mlp, scores, accuracies))
+	for center_quantity in range(1, 20):
+		print('Testing for center quantity', center_quantity)
+		scores, accuracies, test_result_dict = k_fold_cross_validation(data, labels, 5)
+		tests.append(test_result_dict)
 	record_test_results(tests, 'hidden_layer_results.json')
 	
+	'''
 	#Testa a rede mantendo fixo o tamanho da camada oculta e variando a taxa de aprendizado
 	tests = []
 	for learning_rate in np.arange(10e-2, 1, 10e-2):
 		print('Testing for learning rate', learning_rate)
-		mlp = MLP(*[256, 128, 10], learning_rate)
-		scores, accuracies = k_fold_cross_validation(mlp, data, labels, 5)
-		tests.append(build_test_result_dict(mlp, scores, accuracies))
+		rbf = RBFNet(*[256, 128, 10], learning_rate)
+		scores, accuracies = k_fold_cross_validation(rbf, data, labels, 5)
+		tests.append(build_test_result_dict(rbf, scores, accuracies))
 	record_test_results(tests, 'learning_rate_results.json')'''
-	test_logic()
 
 if __name__ == '__main__':
 	main()
