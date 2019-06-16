@@ -17,6 +17,8 @@ class RBFNet():
 		self.hidden_length = self.centers.shape[0]
 		self.output_length = output_length
 		self.learning_rate = learning_rate
+		self.output_activ = self.linear
+		self.output_activ_deriv = self.linear_deriv
 
 		#Inicializa os pesos da camada de saida aleatoriamente, representado-os na forma de matriz
 		#Os pesos e vies de cada neuronio sao dispostos em linhas
@@ -37,12 +39,18 @@ class RBFNet():
 		fnet = np.exp(-((dists**2)/(2*(self.spread**2))))
 		return fnet
 
-	def activ_output(self, net):
+	def sigmoid(self, net):
 		return (1./(1.+math.exp(-net)))
 
-	def deriv_activ_output(self, fnet):
+	def sigmoid_deriv(self, fnet):
 		one_vector = np.ones(fnet.shape)
 		return fnet*(one_vector-fnet)
+
+	def linear(self, net):
+		return net
+
+	def linear_deriv(self, fnet):
+		return fnet
 
 	#Faz forward propagation, retornando apenas o vetor produzido pela camada de saida
 	#Isto eh feito porque, para usos do forward propagation fora do treinamento, 
@@ -73,7 +81,7 @@ class RBFNet():
 		#Wo x H = net, sendo Wo a matriz de pesos da camada de saida e H o vetor produzido pela ativacao
 		#da camada oculta
 		out_net = np.dot(self.output_layer, biased_hidden_activ)
-		out_fnet = np.array([self.activ_output(x) for x in out_net])
+		out_fnet = np.array([self.output_activ(x) for x in out_net])
 		#Como a camada de saida usa ativacao linear, nenhuma ativacao é aplicada
 
 
@@ -113,13 +121,13 @@ class RBFNet():
 				hidden_fnet, out_net, out_fnet = self.forward_training(input_samples[i])
 				
 				#Cria um vetor com o erro de cada neuronio da camada de saida
-				error_array = (target_label - out_fnet)
+				error_array = -(target_label - out_fnet)
 
 				#Calcula a variacao dos pesos da camada de saida com a regra delta generalizada
 				#delta_o_pk = (Ypk-Ok)*Opk(1-Opk), sendo p a amostra atual do conjunto de treinamento,
 				#e k um neuronio da camada de saida. Ypk eh a saida esperada do neuronio pelo exemplo do dataset,
 				#Opk eh a saida de fato produzida pelo neuronio
-				delta_output_layer = error_array * self.deriv_activ_output(out_fnet)
+				delta_output_layer = error_array * self.output_activ_deriv(out_fnet)
 
 
 				hidden_fnet_with_bias = np.zeros(hidden_fnet.shape[0]+1)
@@ -127,10 +135,15 @@ class RBFNet():
 				hidden_fnet_with_bias[self.hidden_length] = 1
 				#Atualiza os pesos da camada de saida
 				#Wkj(t+1) = wkj(t) + eta*deltak*Ij
+				#for neuron in range(0, self.output_length):
+				#	for weight in range(0, self.output_layer.shape[1]):
+				#		self.output_layer[neuron, weight] = self.output_layer[neuron, weight] - \
+				#			self.learning_rate * out_fnet[neuron] * hidden_fnet_with_bias[weight]
 				for neuron in range(0, self.output_length):
 					for weight in range(0, self.output_layer.shape[1]):
-						self.output_layer[neuron, weight] = self.output_layer[neuron, weight] + \
-							self.learning_rate * delta_output_layer[neuron] * hidden_fnet_with_bias[weight]
+						self.output_layer[neuron, weight] = self.output_layer[neuron,weight]\
+							- hidden_fnet_with_bias[weight]*error_array[neuron]*learning_rate
+
 
 				#O erro da saída de cada neuronio é elevado ao quadrado e somado ao erro total da epoca
 				#para calculo do erro quadratico medio ao final
@@ -156,7 +169,7 @@ def test_logic():
 
 	x = np.array([[0,0],[0,1],[1,0],[1,1]])
 	centers = np.array([[0,0],[1,1]])
-	target = np.array([0, 0, 0, 1])
+	target = np.array([0, 1, 1, 0])
 	rbf = RBFNet(input_length=2, centers=centers, spread=1.0, output_length=1)
 
 	print('\n\noutput before backpropagation')
@@ -289,7 +302,7 @@ def k_fold_cross_validation(data, labels, k):
 		accuracies.append(accuracy)
 
 	print('===========================')
-	print('NUMBER OF NEURONS', rbf.hidden_length)
+	print('NUMBER OF CENTERS', rbf.hidden_length)
 	print('AVERAGE ACCURACY', np.sum(accuracies)/len(accuracies))
 	print('===========================')
 	result_dict = build_test_result_dict(rbf, scores, accuracies)
@@ -312,15 +325,15 @@ def build_test_result_dict(rbf, scores, accuracies):
 	return test_results
 
 def main():
-	#test_logic()
-	data, labels = load_digits()
+	test_logic()
+	#data, labels = load_digits()
 	#Testa a rede variando o número de funções RBF e mantendo fixa a taxa de aprendizado
-	tests = []
+	'''tests = []
 	for center_quantity in range(1, 20):
 		print('Testing for center quantity', center_quantity)
 		scores, accuracies, test_result_dict = k_fold_cross_validation(data, labels, center_quantity)
 		tests.append(test_result_dict)
-	record_test_results(tests, 'hidden_layer_results.json')
+	record_test_results(tests, 'hidden_layer_results.json')'''
 	
 	'''
 	#Testa a rede mantendo fixo o tamanho da camada oculta e variando a taxa de aprendizado
