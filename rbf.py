@@ -6,7 +6,7 @@ import os
 import json
 from sklearn.cluster import KMeans
 
-#Classe que representa o multilayer perceptron
+#Classe que representa a rede RBF
 class RBFNet():
 	#Construtor. Recebe o tamanho da cadama de entrada, centroides, dispersao, tamanho da camada de saida
 	#e taxa de aprendizado
@@ -18,8 +18,8 @@ class RBFNet():
 		print('HIDDEN LAYER LENGTH', self.hidden_length)
 		self.output_length = output_length
 		self.learning_rate = learning_rate
-		self.output_activ = self.linear
-		self.output_activ_deriv = self.linear_deriv
+		self.output_activ = self.sigmoid
+		self.output_activ_deriv = self.sigmoid_deriv
 
 		#Inicializa os pesos da camada de saida aleatoriamente, representado-os na forma de matriz
 		#Os pesos e vies de cada neuronio sao dispostos em linhas
@@ -71,7 +71,6 @@ class RBFNet():
 
 		#Passa o vetor de entrada pela camada oculta, calculando a sua distancia para cada centroide
 		hidden_fnet = self.gaussian(input_vect)
-		hidden_fnet = normalize(data=hidden_fnet, range_min=0, range_max=1)
 
 		#Adiciona um componente "1" ao vetor produzido pela camada oculta para permitir calculo do bias
 		#na camada de saida
@@ -84,11 +83,7 @@ class RBFNet():
 		#da camada oculta
 		out_net = np.dot(self.output_layer, biased_hidden_activ)
 		out_fnet = np.array([self.output_activ(x) for x in out_net])
-		#Como a camada de saida usa ativacao linear, nenhuma ativacao é aplicada
-		print('out net', out_net)
-		print('out fnet', out_fnet)
-		print('normalized hidden fnet', hidden_fnet)
-		print('output layer', self.output_layer)
+		
 
 		#Retorna ativacao da camada oculta 
 		return hidden_fnet, out_net, out_fnet
@@ -127,12 +122,16 @@ class RBFNet():
 				
 				#Cria um vetor com o erro de cada neuronio da camada de saida
 				error_array = -(target_label - out_fnet)
+				#print('target label', target_label)
+				#print('out fnet', out_fnet)
+				#print('error array', error_array)
+
 
 				#Calcula a variacao dos pesos da camada de saida com a regra delta generalizada
 				#delta_o_pk = (Ypk-Ok)*Opk(1-Opk), sendo p a amostra atual do conjunto de treinamento,
 				#e k um neuronio da camada de saida. Ypk eh a saida esperada do neuronio pelo exemplo do dataset,
 				#Opk eh a saida de fato produzida pelo neuronio
-				#delta_output_layer = error_array * self.output_activ_deriv(out_fnet)
+				#delta_output_layer = error_array * self.output_activ_deriv(np.array(out_fnet))
 				hidden_fnet_with_bias = np.zeros(hidden_fnet.shape[0]+1)
 				hidden_fnet_with_bias[0:self.hidden_length] = hidden_fnet[:]
 				hidden_fnet_with_bias[self.hidden_length] = 1
@@ -144,14 +143,10 @@ class RBFNet():
 				#		self.output_layer[neuron, weight] = self.output_layer[neuron, weight] - \
 				#			self.learning_rate * out_fnet[neuron] * hidden_fnet_with_bias[weight]
 				for neuron in range(0, self.output_length):
-					for weight in range(0, self.output_layer.shape[1]-1):
-						self.output_layer[neuron, weight] = self.output_layer[neuron,weight] - \
-							hidden_fnet_with_bias[weight]*error_array[neuron]*learning_rate
-					#Atualizacao do bias
-					self.output_layer[neuron, self.output_layer.shape[1]-1] = \
-					self.output_layer[neuron, self.output_layer.shape[1]-1] + learning_rate*error_array[neuron]
-#						print('neuron', neuron, ' weight ', weight,' after update', self.output_layer[neuron, weight])
-#						input()
+					for weight in range(0, self.output_layer.shape[1]):
+						self.output_layer[neuron, weight] = self.output_layer[neuron,weight]\
+							- hidden_fnet_with_bias[weight]*error_array[neuron]*learning_rate
+
 
 				#O erro da saída de cada neuronio é elevado ao quadrado e somado ao erro total da epoca
 				#para calculo do erro quadratico medio ao final
@@ -320,7 +315,6 @@ def k_fold_cross_validation(data, labels, k):
 			absolute_threshold=5e-5, relative_threshold=10e-6, learning_rate=5e-1)
 
 		score, accuracy = measure_score(rbf, data[test_set], labels[test_set])
-		input()
 		scores.append(score)
 		accuracies.append(accuracy)
 
@@ -328,7 +322,6 @@ def k_fold_cross_validation(data, labels, k):
 	print('NUMBER OF CENTERS', rbf.hidden_length)
 	print('AVERAGE ACCURACY', np.sum(accuracies)/len(accuracies))
 	print('===========================')
-	input()
 	result_dict = build_test_result_dict(rbf, scores, accuracies)
 
 	return scores, accuracies, result_dict
