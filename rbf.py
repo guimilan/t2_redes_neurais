@@ -278,15 +278,10 @@ def k_fold_cross_validation(data, labels, k):
 		input_length = data[train_set].shape[1]
 		output_length = labels[test_set].shape[1]
 		
-		print('input length', input_length)
-		print('output length', output_length)
-
-		print('Performing k-means clustering on the training set...')
-		centers = KMeans(n_clusters=k, random_state=0).fit(data[train_set]).cluster_centers_
-		print('centers', centers)
+		centers = KMeans(n_clusters=k).fit(data[train_set]).cluster_centers_
 		rbf = RBFNet(input_length=input_length, centers=centers, spread=1.0, output_length=output_length)
 		rbf.fit(input_samples=data[train_set], target_labels=labels[train_set], 
-			absolute_threshold=5e-3, relative_threshold=10e-8, learning_rate=5e-1)
+			absolute_threshold=5e-5, relative_threshold=10e-9, learning_rate=5e-1)
 
 		score, accuracy = measure_score(rbf, data[test_set], labels[test_set])
 		print('accuracy {}: {}%'.format(index, accuracy))
@@ -319,11 +314,11 @@ def build_test_result_dict(rbf, scores, accuracies):
 def main():
 	#test_logic()
 	data, labels = load_digits()
-	#Testa a rede variando o tamanho da camada oculta e mantendo fixa a taxa de aprendizado
+	#Testa a rede variando o número de funções RBF e mantendo fixa a taxa de aprendizado
 	tests = []
 	for center_quantity in range(1, 20):
 		print('Testing for center quantity', center_quantity)
-		scores, accuracies, test_result_dict = k_fold_cross_validation(data, labels, 5)
+		scores, accuracies, test_result_dict = k_fold_cross_validation(data, labels, center_quantity)
 		tests.append(test_result_dict)
 	record_test_results(tests, 'hidden_layer_results.json')
 	
